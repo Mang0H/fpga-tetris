@@ -39,6 +39,7 @@ module game_logic (
         INIT,
         SPAWN_PIECE,
         FALLING,
+        WIGGLE,
         LOCK_PIECE,
         CLEAR_LINES,
         GAME_OVER
@@ -67,20 +68,29 @@ module game_logic (
     logic [15:0] level;
     logic [15:0] lines_cleared;
     logic [2:0] rand_val;
+    logic [15:0] lfsr_reg;
+    logic lfsr_feedback;
     
     // Timing and controls
     logic [31:0] drop_timer;
     logic [31:0] delay_timer;
     logic [31:0] rot_timer;
+    logic [31:0] wiggle_timer;
     logic drop_event;
     logic delay_event;
     logic rot_event;
-    localparam INITIAL_DROP_TIME = 5000000; // Adjust for your clock speed
+    logic wiggle_event;
+
+    localparam INITIAL_DROP_TIME = 25000000; // Adjust for your clock speed
+    localparam SOFT_DROP_TIME = 1000000;
     localparam X_DELAY = 5000000;
     localparam R_DELAY = 5000000;
+    localparam WIGGLE_DELAY = 5000000;
     // localparam INITIAL_DROP_TIME = 1000;
+    // localparam SOFT_DROP_TIME = 100;
     // localparam X_DELAY = 200;
     // localparam R_DELAY = 200;
+    // localparam WIGGLE_DELAY = 200;
     localparam LEVEL_DROP_DECREMENT = 50_000;
 
     // Tetramino ROM interface
@@ -162,7 +172,7 @@ always_comb begin
     end
     task automatic new_piece();
         // Simple pseudo-random number (replace with better RNG if needed)
-        rand_val <= count % 7;
+        rand_val <= lfsr_reg % 7;
         
         next_piece <= piece_type_t'(rand_val);
         
@@ -182,12 +192,20 @@ always_comb begin
         drop_timer <= INITIAL_DROP_TIME; // - level * LEVEL_DROP_DECREMENT;
     endtask
     
+    task automatic reset_soft_timer();
+        drop_timer <= SOFT_DROP_TIME;
+    endtask
+    
     task automatic reset_x_delay();
         delay_timer <= X_DELAY;
     endtask
 
     task automatic reset_rot_delay();
         rot_timer <= R_DELAY;
+    endtask
+
+    task automatic reset_wiggle_delay();
+        wiggle_timer <= WIGGLE_DELAY;
     endtask
 
     logic debug;
@@ -218,7 +236,8 @@ always_comb begin
         return 1;
     endfunction
 
-    function logic can_rotate(input int direction);
+    function logic can_rotate(input int direction);?
+    
         int x;
         logic [4:0] x_rot_off;
         logic [5:0] y_rot_off;
@@ -250,7 +269,7 @@ always_comb begin
             // Clear VRAM
             for (int y = 0; y < GRID_ROWS; y++) begin
                 for (int x = 2; x < GRID_COLS; x++) begin
-                    vram[y][x] <= {0, BLACK};
+                    vram[y][x] <= {1'b0, BLACK};
                 end
             end
             
@@ -260,7 +279,9 @@ always_comb begin
             lines_cleared <= 0;
             drop_timer <= 0;
             delay_timer <= 0;
+            wiggle_timer <=0;
             count <= 0;
+            lfsr_reg <= 16'hF00D;
             current_x <= 0;
             current_y <= 0;
             new_piece();
@@ -270,6 +291,7 @@ always_comb begin
             unique case (next_state)
                 INIT: begin
                     count <= count + 3'b1;
+                    lfsr_reg <= {lfsr_reg[14:0], lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10]};
                     new_piece();
                 end
                 SPAWN_PIECE: begin
@@ -290,6 +312,9 @@ always_comb begin
                         end
                     end
                 end
+                WIGGLE: begin
+                    reset_wiggle_delay();
+                end
                 LOCK_PIECE: begin
                     for(int x=0; x<4; x++) begin
                         block_x_offset[x] = piece_data[current_rotation][(x*9 + 5) +:4];
@@ -298,12 +323,19 @@ always_comb begin
                     end
                 end
             endcase
-            if (game_state == FALLING) begin
-                 if (drop_timer > 0) begin
+            if (game_state == FALLING || game_state == WIGGLE) begin
+                if (drop_timer > 0) begin
                     drop_timer <= drop_timer - 1;
                 end
+                else if (keycode == 8'h16 && can_move(0, 1) && drop_event) begin
+                    reset_soft_timer();
+                end 
                 else if (can_move(0, 1) && drop_event) begin
                     reset_drop_timer();
+                end
+
+                if (wiggle_timer > 0) begin
+                    wiggle_timer <= wiggle_timer - 1;
                 end
 
                 if (keycode == 8'h04 && can_move(-1, 0) && delay_event) begin
@@ -345,6 +377,8 @@ always_comb begin
         drop_event = (drop_timer == 0);
         delay_event = (delay_timer == 0);
         rot_event = (rot_timer == 0);
+        wiggle_event = (wiggle_timer == 0);
+
         unique case (game_state) 
             INIT:
                 next_state = SPAWN_PIECE;
@@ -357,6 +391,10 @@ always_comb begin
             end
             FALLING:
                 if (drop_event && !can_move(0, 1)) begin
+                    next_state = WIGGLE;
+                end
+            WIGGLE:
+                if (wiggle_event) begin
                     next_state = LOCK_PIECE;
                 end
             LOCK_PIECE:
@@ -412,3 +450,10 @@ always_comb begin
     end
 
 endmodule
+
+
+
+
+
+
+
