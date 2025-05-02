@@ -40,7 +40,6 @@ module game_logic (
         INIT,
         SPAWN_PIECE,
         FALLING,
-        WIGGLE,
         LOCK_PIECE,
         CLEAR_LINES,
         GAME_OVER
@@ -69,14 +68,11 @@ module game_logic (
     logic [15:0] level;
     logic [15:0] lines_cleared;
     logic [2:0] rand_val;
-    logic [15:0] lfsr_reg;
-    logic lfsr_feedback;
     
     // Timing and controls
     logic [31:0] drop_timer;
     logic [31:0] delay_timer;
     logic [31:0] rot_timer;
-    logic [31:0] wiggle_timer;
     logic drop_event;
     logic delay_event;
     logic rot_event;
@@ -88,10 +84,8 @@ module game_logic (
     localparam R_DELAY = 5000000;
     localparam WIGGLE_DELAY = 12500000;
     // localparam INITIAL_DROP_TIME = 1000;
-    // localparam SOFT_DROP_TIME = 100;
     // localparam X_DELAY = 200;
     // localparam R_DELAY = 200;
-    // localparam WIGGLE_DELAY = 200;
     localparam LEVEL_DROP_DECREMENT = 50_000;
 
     // Tetramino ROM interface
@@ -233,7 +227,7 @@ module game_logic (
     end
     task automatic new_piece();
         // Simple pseudo-random number (replace with better RNG if needed)
-        rand_val <= lfsr_reg % 7;
+        rand_val <= count % 7;
         
         next_piece <= piece_type_t'(rand_val);
         
@@ -253,20 +247,12 @@ module game_logic (
         drop_timer <= INITIAL_DROP_TIME; // - level * LEVEL_DROP_DECREMENT;
     endtask
     
-    task automatic reset_soft_timer();
-        drop_timer <= SOFT_DROP_TIME;
-    endtask
-    
     task automatic reset_x_delay();
         delay_timer <= X_DELAY;
     endtask
 
     task automatic reset_rot_delay();
         rot_timer <= R_DELAY;
-    endtask
-
-    task automatic reset_wiggle_delay();
-        wiggle_timer <= WIGGLE_DELAY;
     endtask
 
     logic debug;
@@ -358,7 +344,7 @@ module game_logic (
             // Clear VRAM
             for (int y = 0; y < GRID_ROWS; y++) begin
                 for (int x = 2; x < GRID_COLS; x++) begin
-                    vram[y][x] <= {1'b0, BLACK};
+                    vram[y][x] <= {0, BLACK};
                 end
             end
             
@@ -368,7 +354,6 @@ module game_logic (
             lines_cleared <= 0;
             drop_timer <= 0;
             delay_timer <= 0;
-            wiggle_timer <=0;
             count <= 0;
             lfsr_reg <= 16'hA12B;
             current_x <= 0;
@@ -382,7 +367,6 @@ module game_logic (
             unique case (next_state)
                 INIT: begin
                     count <= count + 3'b1;
-                    lfsr_reg <= {lfsr_reg[14:0], lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10]};
                     new_piece();
                 end
                 SPAWN_PIECE: begin
@@ -544,8 +528,6 @@ module game_logic (
         drop_event = (drop_timer == 0);
         delay_event = (delay_timer == 0);
         rot_event = (rot_timer == 0);
-        wiggle_event = (wiggle_timer == 0);
-
         unique case (game_state) 
             INIT:
                 next_state = SPAWN_PIECE;
@@ -619,10 +601,3 @@ module game_logic (
     end
 
 endmodule
-
-
-
-
-
-
-
