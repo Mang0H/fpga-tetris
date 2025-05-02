@@ -67,6 +67,8 @@ module game_logic (
     logic [15:0] level;
     logic [15:0] lines_cleared;
     logic [2:0] rand_val;
+    logic [15:0] lfsr_reg;
+    logic lfsr_feedback;
     
     // Timing and controls
     logic [31:0] drop_timer;
@@ -162,7 +164,7 @@ always_comb begin
     end
     task automatic new_piece();
         // Simple pseudo-random number (replace with better RNG if needed)
-        rand_val <= count % 7;
+        rand_val <= lfsr_reg % 7;
         
         next_piece <= piece_type_t'(rand_val);
         
@@ -261,6 +263,7 @@ always_comb begin
             drop_timer <= 0;
             delay_timer <= 0;
             count <= 0;
+            lfsr_reg <= 16'hACE1;
             current_x <= 0;
             current_y <= 0;
             new_piece();
@@ -270,6 +273,7 @@ always_comb begin
             unique case (next_state)
                 INIT: begin
                     count <= count + 3'b1;
+                    lfsr_reg <= {lfsr_reg[14:0], lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10]};
                     new_piece();
                 end
                 SPAWN_PIECE: begin
