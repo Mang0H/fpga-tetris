@@ -6,7 +6,8 @@ module game_logic (
     input  logic [9:0] drawX,
     input  logic [9:0] drawY,
     input  logic vde, // active video enable
-    input  logic [7:0] keycode,
+    input  logic [7:0] keycode1,
+    input  logic [7:0] keycode2,
     output logic [3:0] red,
     output logic [3:0] green,
     output logic [3:0] blue
@@ -83,9 +84,9 @@ module game_logic (
 
     localparam INITIAL_DROP_TIME = 25000000; // Adjust for your clock speed
     localparam SOFT_DROP_TIME = 1000000;
-    localparam X_DELAY = 5000000;
+    localparam X_DELAY = 2500000;
     localparam R_DELAY = 5000000;
-    localparam WIGGLE_DELAY = 5000000;
+    localparam WIGGLE_DELAY = 12500000;
     // localparam INITIAL_DROP_TIME = 1000;
     // localparam SOFT_DROP_TIME = 100;
     // localparam X_DELAY = 200;
@@ -236,7 +237,7 @@ always_comb begin
         return 1;
     endfunction
 
-    function logic can_rotate(input int direction);?
+    function logic can_rotate(input int direction);
     
         int x;
         logic [4:0] x_rot_off;
@@ -262,6 +263,55 @@ always_comb begin
         return 1;
     endfunction
 
+    function logic wiggle_rotate_bot (input int direction);
+        int x;
+        logic [4:0] x_rot_off;
+        logic [5:0] y_rot_off;
+
+        for (x=0; x<4; x++) begin
+            x_rot_off = piece_data[current_rotation + direction][(x*9 + 5) +: 4];
+            y_rot_off = piece_data[current_rotation + direction][(x*9) +: 5];
+
+            if ((current_x + x_rot_off) >= 2 ||
+                (current_x + x_rot_off) < GRID_COLS ||
+                (current_y + y_rot_off) >= GRID_ROWS) begin
+                return 1;
+            end
+
+            if ((current_y + y_rot_off) >= 0 &&
+                (current_x + x_rot_off) >= 2 &&
+                (current_x + x_rot_off) < 12 &&
+                vram[current_y+y_rot_off][current_x + x_rot_off][4]==1) begin
+                return 1;
+            end
+        end
+        return 0;
+    endfunction
+
+    //     function logic wiggle_left_edge (input int direction);
+    //     int x;
+    //     logic [4:0] x_rot_off;
+    //     logic [5:0] y_rot_off;
+
+    //     for (x=0; x<4; x++) begin
+    //         x_rot_off = piece_data[current_rotation + direction][(x*9 + 5) +: 4];
+    //         y_rot_off = piece_data[current_rotation + direction][(x*9) +: 5];
+
+    //         if ((current_x + x_rot_off) < 2 &&
+    //             (current_y + y_rot_off) < GRID_ROWS) begin
+    //             return 1;
+    //         end
+
+    //         if ((current_y + y_rot_off) >= 0 &&
+    //             (current_x + x_rot_off) >= 2 &&
+    //             (current_x + x_rot_off) < 12 &&
+    //             vram[current_y+y_rot_off][current_x + x_rot_off][4]==1) begin
+    //             return 1;
+    //         end
+    //     end
+    //     return 0;
+    // endfunction
+
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             game_state <= INIT;
@@ -281,7 +331,7 @@ always_comb begin
             delay_timer <= 0;
             wiggle_timer <=0;
             count <= 0;
-            lfsr_reg <= 16'hF00D;
+            lfsr_reg <= 16'hA12B;
             current_x <= 0;
             current_y <= 0;
             new_piece();
@@ -314,6 +364,11 @@ always_comb begin
                 end
                 WIGGLE: begin
                     reset_wiggle_delay();
+                    if (can_move(0, 1)) begin
+                        if (drop_event) begin
+                            current_y <= current_y + 1;
+                        end
+                    end
                 end
                 LOCK_PIECE: begin
                     for(int x=0; x<4; x++) begin
@@ -327,7 +382,7 @@ always_comb begin
                 if (drop_timer > 0) begin
                     drop_timer <= drop_timer - 1;
                 end
-                else if (keycode == 8'h16 && can_move(0, 1) && drop_event) begin
+                else if ((keycode1 == 8'h16 || keycode2 == 8'h16) && can_move(0, 1) && (drop_event)) begin
                     reset_soft_timer();
                 end 
                 else if (can_move(0, 1) && drop_event) begin
@@ -338,11 +393,11 @@ always_comb begin
                     wiggle_timer <= wiggle_timer - 1;
                 end
 
-                if (keycode == 8'h04 && can_move(-1, 0) && delay_event) begin
+                if ((keycode1 == 8'h04 || keycode2 == 8'h04) && can_move(-1, 0) && delay_event) begin
                     current_x <= current_x - 1;
                     reset_x_delay();
                 end
-                else if (keycode == 8'h07 && can_move(1, 0) && delay_event) begin
+                else if ((keycode1 == 8'h07 || keycode2 == 8'h07) && can_move(1, 0) && delay_event) begin
                     current_x <= current_x + 1;
                     reset_x_delay();
                 end
@@ -350,21 +405,25 @@ always_comb begin
                     delay_timer <= delay_timer - 1;
                 end
 
-                if (keycode == 8'h0D && can_rotate(-1) && rot_event) begin
+                if ((keycode1 == 8'h0D || keycode2 == 8'h0D) && can_rotate(-1) && rot_event) begin
                     current_rotation <= current_rotation - 2'b01;
                     reset_rot_delay();
                 end
-                else if (keycode == 8'h0F && can_rotate(1) && rot_event) begin
+                else if ((keycode1 == 8'h0F || keycode2 == 8'h0F) && can_rotate(1) && rot_event) begin
                     current_rotation <= current_rotation + 2'b01;
                     reset_rot_delay();
                 end
-                else if (keycode == 8'h0E && can_rotate(2) && rot_event) begin
+                else if ((keycode1 == 8'h0E || keycode2 == 8'h0E) && can_rotate(2) && rot_event) begin
                     current_rotation <= current_rotation + 2'b10;
                     reset_rot_delay();
                 end
                 else if (rot_timer > 0) begin
                     rot_timer <= rot_timer - 1;
                 end
+            end
+            if (game_state == WIGGLE && (keycode1 == 8'h0D || keycode2 == 8'h0D || keycode1 == 8'h0F || keycode2 == 8'h0F || keycode1 == 8'h0E || keycode2 == 8'h0E) &&
+                (wiggle_rotate_bot(-1) || wiggle_rotate_bot(1)) && rot_event) begin
+                current_y <= current_y - 1;
             end
         end
      end
@@ -394,7 +453,7 @@ always_comb begin
                     next_state = WIGGLE;
                 end
             WIGGLE:
-                if (wiggle_event) begin
+                if (wiggle_event && !can_move(0, 1)) begin
                     next_state = LOCK_PIECE;
                 end
             LOCK_PIECE:
@@ -414,10 +473,10 @@ always_comb begin
 
         if (vde) begin
             if (gridX <= GRID_WIDTH && gridY <= GRID_HEIGHT) begin
-                if (cellX == 0 || cellY == 0) begin
+                if ((cellX == 0 || cellY == 0) && !in_active_piece && !(vram[grid_cellY][grid_cellX][4] == 1)) begin
                     {red, green, blue} = {4'hF, 4'hF, 4'hF};
                 end
-                else if (in_active_piece && (game_state == FALLING)) begin
+                else if (in_active_piece && (game_state == FALLING || game_state == WIGGLE)) begin
                     unique case (active_piece_color)
                         CYAN:   {red, green, blue} = {4'h0, 4'hF, 4'hF};
                         BLUE:   {red, green, blue} = {4'h0, 4'h0, 4'h9};
