@@ -76,7 +76,8 @@ module tetris_top (
         .drawX(drawX),
         .drawY(drawY),
         .vde(vde),
-        .keycode(keycode0_gpio[7:0]),
+        .keycode1(keycode0_gpio[7:0]),
+        .keycode2(keycode0_gpio[15:8]),
         .red(red),
         .green(green),
         .blue(blue)
