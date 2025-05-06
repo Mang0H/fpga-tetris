@@ -350,6 +350,7 @@ module game_logic (
 
     logic hard_drop_active; // <-- new declaration
     logic [4:0] completed;
+    logic line_complete;
 
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -374,6 +375,9 @@ module game_logic (
             current_x <= 0;
             current_y <= 0;
 
+            line_complete <= 0;
+            completed <= 0;
+            
             hard_drop_active <= 0;
             new_piece();
         end else begin
@@ -419,7 +423,6 @@ module game_logic (
                     end
                 end
                 CLEAR_LINES: begin
-                    logic line_complete;
                     completed = 5'b0;
                     
                     for (int y = GRID_ROWS-1; y >= 0; y--) begin
@@ -489,7 +492,18 @@ module game_logic (
                     reset_drop_timer();
                 end
 
-                if (keycode == 8'h04 && can_move(-1, 0) && delay_event) begin
+                // Drop timer
+                if (drop_timer > 0) begin
+                    drop_timer <= drop_timer - 1;
+                end
+
+                // Wiggle timer
+                if (wiggle_timer > 0) begin
+                    wiggle_timer <= wiggle_timer - 1;
+                end
+
+                // Left/right movement
+                if ((keycode1 == 8'h04 || keycode2 == 8'h04) && can_move(-1, 0) && delay_event) begin
                     current_x <= current_x - 1;
                     reset_x_delay();
                 end
