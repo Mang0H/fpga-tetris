@@ -288,29 +288,7 @@ always_comb begin
         return 0;
     endfunction
 
-    //     function logic wiggle_left_edge (input int direction);
-    //     int x;
-    //     logic [4:0] x_rot_off;
-    //     logic [5:0] y_rot_off;
-
-    //     for (x=0; x<4; x++) begin
-    //         x_rot_off = piece_data[current_rotation + direction][(x*9 + 5) +: 4];
-    //         y_rot_off = piece_data[current_rotation + direction][(x*9) +: 5];
-
-    //         if ((current_x + x_rot_off) < 2 &&
-    //             (current_y + y_rot_off) < GRID_ROWS) begin
-    //             return 1;
-    //         end
-
-    //         if ((current_y + y_rot_off) >= 0 &&
-    //             (current_x + x_rot_off) >= 2 &&
-    //             (current_x + x_rot_off) < 12 &&
-    //             vram[current_y+y_rot_off][current_x + x_rot_off][4]==1) begin
-    //             return 1;
-    //         end
-    //     end
-    //     return 0;
-    // endfunction
+    logic hard_drop_active; // <-- new declaration
 
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -334,6 +312,8 @@ always_comb begin
             lfsr_reg <= 16'hA12B;
             current_x <= 0;
             current_y <= 0;
+
+            hard_drop_active <= 0;
             new_piece();
         end else begin
             // Default next state
@@ -377,22 +357,79 @@ always_comb begin
                         vram[current_y + block_y_offset[x]][current_x + block_x_offset[x]] <= {1'b1, current_color};
                     end
                 end
+                CLEAR_LINES: begin
+                    logic [4:0] completed;
+                    logic line_complete;
+
+                    completed = 5'b0;
+                    
+                    for (int y = GRID_ROWS-1; y >= 0; y--) begin
+
+                        line_complete = 1'b1;
+                        
+                        // isRowFull
+                        for (int x = 2; x < GRID_COLS; x++) begin
+                            if (vram[y][x][4] != 1'b1) begin
+                                line_complete = 1'b0;
+                                break; 
+                            end
+                        end
+                        
+                        if (line_complete) begin
+                            // clearRow
+                            for (int x = 2; x < GRID_COLS; x++) begin
+                                vram[y][x] <= {1'b0, BLACK};
+                            end
+                            completed = completed + 1'b1;
+                        end 
+                        else if (completed > 0) begin
+                            // moveRowDown
+                            if (y + completed < GRID_ROWS) begin
+                                for (int x = 2; x < GRID_COLS; x++) begin
+                                    vram[y + completed][x] <= vram[y][x];
+                                    vram[y][x] <= {1'b0, BLACK};
+                                end
+                            end
+                        end
+                    end
+                end
             endcase
             if (game_state == FALLING || game_state == WIGGLE) begin
-                if (drop_timer > 0) begin
-                    drop_timer <= drop_timer - 1;
+
+                // Start hard drop on spacebar
+                if ((keycode1 == 8'd44 || keycode2 == 8'd44) && !hard_drop_active) begin
+                    hard_drop_active <= 1;
                 end
-                else if ((keycode1 == 8'h16 || keycode2 == 8'h16) && can_move(0, 1) && (drop_event)) begin
+
+                // Execute hard drop one step per cycle
+                if (hard_drop_active) begin
+                    if (can_move(0, 1)) begin
+                        current_y <= current_y + 1;
+                    end else begin
+                        hard_drop_active <= 0;
+                        drop_timer <= 0; // force lock
+                    end
+                end
+                else if ((keycode1 == 8'h16 || keycode2 == 8'h16) && can_move(0, 1) && drop_event) begin
+                    current_y <= current_y + 1;
                     reset_soft_timer();
-                end 
+                end
                 else if (can_move(0, 1) && drop_event) begin
+                    current_y <= current_y + 1;
                     reset_drop_timer();
                 end
 
+                // Drop timer
+                if (drop_timer > 0) begin
+                    drop_timer <= drop_timer - 1;
+                end
+
+                // Wiggle timer
                 if (wiggle_timer > 0) begin
                     wiggle_timer <= wiggle_timer - 1;
                 end
 
+                // Left/right movement
                 if ((keycode1 == 8'h04 || keycode2 == 8'h04) && can_move(-1, 0) && delay_event) begin
                     current_x <= current_x - 1;
                     reset_x_delay();
@@ -404,7 +441,8 @@ always_comb begin
                 else if (delay_timer > 0) begin
                     delay_timer <= delay_timer - 1;
                 end
-
+                
+                // Rotation
                 if ((keycode1 == 8'h0D || keycode2 == 8'h0D) && can_rotate(-1) && rot_event) begin
                     current_rotation <= current_rotation - 2'b01;
                     reset_rot_delay();
@@ -457,6 +495,8 @@ always_comb begin
                     next_state = LOCK_PIECE;
                 end
             LOCK_PIECE:
+                next_state = CLEAR_LINES;
+            CLEAR_LINES:
                 next_state = INIT;
             GAME_OVER:
                 if (reset) begin
