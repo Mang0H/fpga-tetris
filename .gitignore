@@ -1,0 +1,44 @@
+# Vivado temp files and folders
+*.log
+*.jou
+*.pb
+*.wdb
+*.dcp
+*.mmi
+*.bit
+*.str
+*.rpt
+*.html
+*.xsim
+*.xml
+*.sh
+*.o
+*.ini
+*.db
+*.vds
+*.vdi
+*.backup.*
+*.mif
+*.prj
+
+# Build folders
+.Xil/
+*.runs/
+*.cache/
+*.sim/
+sdk/.metadata/
+sdk/tetris/_ide/
+sdk/tetris_system/_ide/
+tetris.srcs/utils_1/imports/synth_1/
+
+# Auto-generated Vivado design checkpoints and implementation files
+*.build.log
+*.build.ui.log
+*.sc
+*.snap
+*.backup
+*.sprj
+
+# OS and IDE stuff
+.DS_Store
+

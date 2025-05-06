@@ -43,3 +43,11 @@ platform active {tetris_top}
 platform config -updatehw {/home/user/projects/tetris/tetris_top.xsa}
 platform clean
 platform generate
+platform active {tetris_top}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate -domains standalone_microblaze_0 
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate -domains 
+platform active {tetris_top}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate

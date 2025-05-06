@@ -105,15 +105,75 @@ module game_logic (
     logic [4:0] block_y_offset [0:3];
     logic [3:0] count;
 
+    localparam SCORE_COLS   = 16;       // "SCORE:9999  LEVEL:99" = 16 chars
+    localparam SCORE_BASE_X = GRID_X_OFFSET + GRID_WIDTH + 20;  // 440
+    localparam SCORE_BASE_Y = GRID_Y_OFFSET;                    // 40
+
+    logic [3:0] r_grid, g_grid, b_grid;   // rename existing red/green/blue → grid
+    logic [3:0] r_txt,  g_txt,  b_txt;
+    logic        txt_on;
+
     assign gridX = (drawX >= GRID_X_OFFSET) ? (drawX - GRID_X_OFFSET) : 10'h3FF;
     assign gridY = (drawY >= GRID_Y_OFFSET) ? (drawY - GRID_Y_OFFSET) : 10'h3FF;
     assign cellX = gridX % CELL_SIZE; // Pixel within cell
     assign cellY = gridY % CELL_SIZE;
     assign grid_cellX = (gridX / CELL_SIZE) + 2; // X grid coordinate (0-9)
     assign grid_cellY = gridY / CELL_SIZE; // Y grid coordinate (0-19)
+
+    function automatic [7:0] to_ascii(input logic [3:0] nibble);
+        return 8'd48 + nibble;
+    endfunction
+
+    text_renderer #(.COLS(SCORE_COLS), .LINES(2),
+                .BASE_X(SCORE_BASE_X), .BASE_Y(SCORE_BASE_Y))
+    txt (.clk       (clk),
+         .vde       (vde),
+         .drawX     (drawX),
+         .drawY     (drawY),
+         .text      (scoreboard_packed),
+         .pixel_on  (txt_on),
+         .red       (r_txt),
+         .green     (g_txt),
+         .blue      (b_txt));
+
+    logic [7:0] s0;  logic [7:0] s1;  logic [7:0] s2;  logic [7:0] s3;
+    logic [7:0] s4;  logic [7:0] s5;  logic [7:0] s6;  logic [7:0] s7;
+    logic [7:0] s8;  logic [7:0] s9;  logic [7:0] s10; logic [7:0] s11;
+    logic [7:0] s12; logic [7:0] s13; logic [7:0] s14; logic [7:0] s15;
+
+    logic [7:0] l0;  logic [7:0] l1;  logic [7:0] l2;  logic [7:0] l3;
+    logic [7:0] l4;  logic [7:0] l5;  logic [7:0] l6;  logic [7:0] l7;
+    logic [7:0] l8;  logic [7:0] l9;  logic [7:0] l10; logic [7:0] l11;
+    logic [7:0] l12; logic [7:0] l13; logic [7:0] l14; logic [7:0] l15;
+
+    logic [8*16*2-1:0] scoreboard_packed;
+
+    // Updated scoreboard generation
+    always_comb begin : make_scoreboard
+        // upper line
+        s0  = "S";  s1  = "C";  s2  = "O";  s3  = "R";  s4  = "E";  s5  = ":";
+        s6  = to_ascii((score/1000)%10);
+        s7  = to_ascii((score/100)%10);
+        s8  = to_ascii((score/10)%10);
+        s9  = to_ascii(score%10);
+        s10 = " "; s11 = " "; s12 = " "; s13 = " "; s14 = " "; s15 = " ";
+
+        // lower line
+        l0 = "L"; l1 = "E"; l2 = "V"; l3 = "E"; l4 = "L"; l5 = ":";
+        l6 = to_ascii((level/10)%10);
+        l7 = to_ascii(level%10);
+        l8 = " "; l9 = " "; l10 = " "; l11 = " "; l12 = " "; l13 = " "; l14 = " "; l15 = " ";
+
+        scoreboard_packed = {l15,l14,l13,l12,l11,l10,l9,l8,l7,l6,l5,l4,l3,l2,l1,l0,
+                            s15,s14,s13,s12,s11,s10,s9,s8,s7,s6,s5,s4,s3,s2,s1,s0};
+    end
+
+    always_comb begin : mux_grid_text
+        {red,green,blue} = txt_on ? {r_txt,g_txt,b_txt} : {r_grid,g_grid,b_grid};
+    end
     
 
-always_comb begin
+    always_comb begin
         case ({current_piece, current_rotation})
             // I piece (0) - 4 rotations
             {PIECE_I, 2'b11}: piece_data[3] = {4'd1, 5'd0, 4'd1, 5'd1, 4'd1, 5'd2, 4'd1, 5'd3}; // Horizontal
@@ -289,6 +349,7 @@ always_comb begin
     endfunction
 
     logic hard_drop_active; // <-- new declaration
+    logic [4:0] completed;
 
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -358,9 +419,7 @@ always_comb begin
                     end
                 end
                 CLEAR_LINES: begin
-                    logic [4:0] completed;
                     logic line_complete;
-
                     completed = 5'b0;
                     
                     for (int y = GRID_ROWS-1; y >= 0; y--) begin
@@ -391,6 +450,17 @@ always_comb begin
                                 end
                             end
                         end
+                    end
+                    if (completed != 0) begin
+                        case (completed)
+                            1: score <= score + (40   * (level + 1));
+                            2: score <= score + (100  * (level + 1));
+                            3: score <= score + (300  * (level + 1));
+                            4: score <= score + (1200 * (level + 1));
+                        endcase
+                        lines_cleared <= lines_cleared + completed;
+                        if (lines_cleared / 10 > level && level < 99)
+                            level <= level + 1;
                     end
                 end
             endcase
@@ -507,41 +577,41 @@ always_comb begin
 
     //Rendering logic
     always_comb begin
-       red = BLACK;
-       green = BLACK;
-       blue = BLACK;
+        r_grid = BLACK;
+        g_grid = BLACK;
+        b_grid = BLACK;
 
         if (vde) begin
             if (gridX <= GRID_WIDTH && gridY <= GRID_HEIGHT) begin
                 if ((cellX == 0 || cellY == 0) && !in_active_piece && !(vram[grid_cellY][grid_cellX][4] == 1)) begin
-                    {red, green, blue} = {4'hF, 4'hF, 4'hF};
+                    {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
                 end
                 else if (in_active_piece && (game_state == FALLING || game_state == WIGGLE)) begin
                     unique case (active_piece_color)
-                        CYAN:   {red, green, blue} = {4'h0, 4'hF, 4'hF};
-                        BLUE:   {red, green, blue} = {4'h0, 4'h0, 4'h9};
-                        ORANGE: {red, green, blue} = {4'hF, 4'h6, 4'h0};
-                        YELLOW: {red, green, blue} = {4'hF, 4'hF, 4'h0};
-                        GREEN:  {red, green, blue} = {4'h0, 4'hC, 4'h0};
-                        PURPLE: {red, green, blue} = {4'h8, 4'h0, 4'hF};
-                        RED:    {red, green, blue} = {4'hF, 4'h0, 4'h0};
-                        BLACK:  {red, green, blue} = {4'h0, 4'h0, 4'h0}; // Handle Black explicitly
-                        WHITE:  {red, green, blue} = {4'hF, 4'hF, 4'hF};
-                        default: {red, green, blue} = {4'hF, 4'hF, 4'hF};
+                        CYAN:   {r_grid, g_grid, b_grid} = {4'h0, 4'hF, 4'hF};
+                        BLUE:   {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h9};
+                        ORANGE: {r_grid, g_grid, b_grid} = {4'hF, 4'h6, 4'h0};
+                        YELLOW: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'h0};
+                        GREEN:  {r_grid, g_grid, b_grid} = {4'h0, 4'hC, 4'h0};
+                        PURPLE: {r_grid, g_grid, b_grid} = {4'h8, 4'h0, 4'hF};
+                        RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
+                        BLACK:  {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h0};
+                        WHITE:  {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                        default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
                     endcase
                 end
                 else if (vram[grid_cellY][grid_cellX][4] == 1) begin
                     unique case (vram[grid_cellY][grid_cellX][3:0])
-                        CYAN:   {red, green, blue} = {4'h0, 4'hF, 4'hF};
-                        BLUE:   {red, green, blue} = {4'h0, 4'h0, 4'h9};
-                        ORANGE: {red, green, blue} = {4'hF, 4'h6, 4'h0};
-                        YELLOW: {red, green, blue} = {4'hF, 4'hF, 4'h0};
-                        GREEN:  {red, green, blue} = {4'h0, 4'hC, 4'h0};
-                        PURPLE: {red, green, blue} = {4'h8, 4'h0, 4'hF};
-                        RED:    {red, green, blue} = {4'hF, 4'h0, 4'h0};
-                        BLACK:  {red, green, blue} = {4'h0, 4'h0, 4'h0}; // Handle Black explicitly
-                        WHITE:  {red, green, blue} = {4'hF, 4'hF, 4'hF};
-                        default: {red, green, blue} = {4'hF, 4'hF, 4'hF};
+                        CYAN:   {r_grid, g_grid, b_grid} = {4'h0, 4'hF, 4'hF};
+                        BLUE:   {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h9};
+                        ORANGE: {r_grid, g_grid, b_grid} = {4'hF, 4'h6, 4'h0};
+                        YELLOW: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'h0};
+                        GREEN:  {r_grid, g_grid, b_grid} = {4'h0, 4'hC, 4'h0};
+                        PURPLE: {r_grid, g_grid, b_grid} = {4'h8, 4'h0, 4'hF};
+                        RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
+                        BLACK:  {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h0};
+                        WHITE:  {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                        default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
                     endcase
                 end
             end

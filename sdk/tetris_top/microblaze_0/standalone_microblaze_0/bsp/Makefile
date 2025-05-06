@@ -16,7 +16,7 @@ endif
 
 all: 
 	$(MAKE) --no-print-directory seq_libs
-	$(MAKE) -j 1 --no-print-directory par_libs
+	$(MAKE) -j 5 --no-print-directory par_libs
 	$(MAKE) --no-print-directory archive
 	@echo 'Finished building libraries'
 
