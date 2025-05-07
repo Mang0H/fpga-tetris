@@ -65,7 +65,7 @@ module game_logic (
     logic [4:0] current_x; // 0-9
     logic [5:0] current_y; // 0-19
     logic [3:0] current_color, next_color;
-    logic [15:0] score;
+    logic [31:0] score;
     logic [15:0] level;
     logic [15:0] lines_cleared;
     logic [2:0] rand_val;
@@ -82,17 +82,19 @@ module game_logic (
     logic rot_event;
     logic wiggle_event;
 
-    localparam INITIAL_DROP_TIME = 25000000; // Adjust for your clock speed
+    logic prev_keycode1_down;
+
+    localparam INITIAL_DROP_TIME = 25_000_000;  // Adjust for your clock speed
+    localparam int MIN_DROP_TIME  = 300_000;
     localparam SOFT_DROP_TIME = 1000000;
     localparam X_DELAY = 2500000;
     localparam R_DELAY = 5000000;
-    localparam WIGGLE_DELAY = 12500000;
+    localparam WIGGLE_DELAY = 10000000;
     // localparam INITIAL_DROP_TIME = 1000;
     // localparam SOFT_DROP_TIME = 100;
     // localparam X_DELAY = 200;
     // localparam R_DELAY = 200;
     // localparam WIGGLE_DELAY = 200;
-    localparam LEVEL_DROP_DECREMENT = 50_000;
 
     // Tetramino ROM interface
     logic [35:0] piece_data [0:3];
@@ -105,9 +107,11 @@ module game_logic (
     logic [4:0] block_y_offset [0:3];
     logic [3:0] count;
 
-    localparam SCORE_COLS   = 16;       // "SCORE:9999  LEVEL:99" = 16 chars
+    localparam SCORE_COLS   = 20;       // "SCORE:9999  LEVEL:99" = 16 chars
     localparam SCORE_BASE_X = GRID_X_OFFSET + GRID_WIDTH + 20;  // 440
     localparam SCORE_BASE_Y = GRID_Y_OFFSET;                    // 40
+    localparam NEXT_X = SCORE_BASE_X;
+    localparam NEXT_Y = SCORE_BASE_Y + 40; // below score
 
     logic [3:0] r_grid, g_grid, b_grid;   // rename existing red/green/blue → grid
     logic [3:0] r_txt,  g_txt,  b_txt;
@@ -140,32 +144,42 @@ module game_logic (
     logic [7:0] s4;  logic [7:0] s5;  logic [7:0] s6;  logic [7:0] s7;
     logic [7:0] s8;  logic [7:0] s9;  logic [7:0] s10; logic [7:0] s11;
     logic [7:0] s12; logic [7:0] s13; logic [7:0] s14; logic [7:0] s15;
+    logic [7:0] s16; logic [7:0] s17; logic [7:0] s18; logic [7:0] s19;
 
     logic [7:0] l0;  logic [7:0] l1;  logic [7:0] l2;  logic [7:0] l3;
     logic [7:0] l4;  logic [7:0] l5;  logic [7:0] l6;  logic [7:0] l7;
     logic [7:0] l8;  logic [7:0] l9;  logic [7:0] l10; logic [7:0] l11;
     logic [7:0] l12; logic [7:0] l13; logic [7:0] l14; logic [7:0] l15;
+    logic [7:0] l16; logic [7:0] l17; logic [7:0] l18; logic [7:0] l19;
 
     logic [8*16*2-1:0] scoreboard_packed;
 
     // Updated scoreboard generation
     always_comb begin : make_scoreboard
-        // upper line
+        // upper line: "SCORE:000000"
         s0  = "S";  s1  = "C";  s2  = "O";  s3  = "R";  s4  = "E";  s5  = ":";
-        s6  = to_ascii((score/1000)%10);
-        s7  = to_ascii((score/100)%10);
-        s8  = to_ascii((score/10)%10);
-        s9  = to_ascii(score%10);
-        s10 = " "; s11 = " "; s12 = " "; s13 = " "; s14 = " "; s15 = " ";
+        s6  = to_ascii((score / 100000) % 10);
+        s7  = to_ascii((score / 10000)  % 10);
+        s8  = to_ascii((score / 1000)   % 10);
+        s9  = to_ascii((score / 100)    % 10);
+        s10 = to_ascii((score / 10)     % 10);
+        s11 = to_ascii(score % 10);
+        s12 = " "; s13 = " "; s14 = " "; s15 = " ";
+        s16 = " "; s17 = " "; s18 = " "; s19 = " ";
 
-        // lower line
+        // lower line: "LEVEL:00"
         l0 = "L"; l1 = "E"; l2 = "V"; l3 = "E"; l4 = "L"; l5 = ":";
-        l6 = to_ascii((level/10)%10);
-        l7 = to_ascii(level%10);
+        l6 = to_ascii((level / 10) % 10);
+        l7 = to_ascii(level % 10);
         l8 = " "; l9 = " "; l10 = " "; l11 = " "; l12 = " "; l13 = " "; l14 = " "; l15 = " ";
+        l16 = " "; l17 = " "; l18 = " "; l19 = " ";
 
-        scoreboard_packed = {l15,l14,l13,l12,l11,l10,l9,l8,l7,l6,l5,l4,l3,l2,l1,l0,
-                            s15,s14,s13,s12,s11,s10,s9,s8,s7,s6,s5,s4,s3,s2,s1,s0};
+        scoreboard_packed = {
+            l19, l18, l17, l16, l15, l14, l13, l12, l11, l10,
+            l9,  l8,  l7,  l6,  l5,  l4,  l3,  l2,  l1,  l0,
+            s19, s18, s17, s16, s15, s14, s13, s12, s11, s10,
+            s9,  s8,  s7,  s6,  s5,  s4,  s3,  s2,  s1,  s0
+        };
     end
 
     always_comb begin : mux_grid_text
@@ -233,7 +247,8 @@ module game_logic (
     end
     task automatic new_piece();
         // Simple pseudo-random number (replace with better RNG if needed)
-        rand_val <= lfsr_reg % 7;
+
+        rand_val <= lfsr_reg % 7; 
         
         next_piece <= piece_type_t'(rand_val);
         
@@ -250,9 +265,15 @@ module game_logic (
     endtask
 
     task automatic reset_drop_timer();
-        drop_timer <= INITIAL_DROP_TIME; // - level * LEVEL_DROP_DECREMENT;
+        int computed_drop;
+        computed_drop = INITIAL_DROP_TIME / (level + 1); // avoid division by zero
+
+        if (computed_drop < MIN_DROP_TIME)
+            drop_timer <= MIN_DROP_TIME;
+        else
+            drop_timer <= computed_drop;
     endtask
-    
+
     task automatic reset_soft_timer();
         drop_timer <= SOFT_DROP_TIME;
     endtask
@@ -352,6 +373,7 @@ module game_logic (
     logic [4:0] completed;
     logic line_complete;
 
+
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             game_state <= INIT;
@@ -367,22 +389,26 @@ module game_logic (
             score <= 0;
             level <= 0;
             lines_cleared <= 0;
+
             drop_timer <= 0;
+
+
             delay_timer <= 0;
             wiggle_timer <=0;
             count <= 0;
-            lfsr_reg <= 16'hA12B;
+            lfsr_reg <= 16'h7DFC;
             current_x <= 0;
             current_y <= 0;
 
             line_complete <= 0;
             completed <= 0;
-            
+
             hard_drop_active <= 0;
             new_piece();
         end else begin
             // Default next state
             game_state <= next_state;
+
             unique case (next_state)
                 INIT: begin
                     count <= count + 3'b1;
@@ -462,15 +488,17 @@ module game_logic (
                             4: score <= score + (1200 * (level + 1));
                         endcase
                         lines_cleared <= lines_cleared + completed;
-                        if (lines_cleared / 10 > level && level < 99)
+                        if (lines_cleared / 10 > level && level < 99) begin
                             level <= level + 1;
+                            reset_drop_timer();
+                        end
                     end
                 end
             endcase
             if (game_state == FALLING || game_state == WIGGLE) begin
 
                 // Start hard drop on spacebar
-                if ((keycode1 == 8'd44 || keycode2 == 8'd44) && !hard_drop_active) begin
+                if ((keycode1 == 8'd44 || keycode2 == 8'd44) && !prev_keycode1_down) begin
                     hard_drop_active <= 1;
                 end
 
@@ -483,7 +511,7 @@ module game_logic (
                         drop_timer <= 0; // force lock
                     end
                 end
-                else if ((keycode1 == 8'h16 || keycode2 == 8'h16) && can_move(0, 1) && drop_event) begin
+                else if ((keycode1 == 8'h51 || keycode2 == 8'h51) && can_move(0, 1) && drop_event) begin
                     current_y <= current_y + 1;
                     reset_soft_timer();
                 end
@@ -503,11 +531,11 @@ module game_logic (
                 end
 
                 // Left/right movement
-                if ((keycode1 == 8'h04 || keycode2 == 8'h04) && can_move(-1, 0) && delay_event) begin
+                if ((keycode1 == 8'h50 || keycode2 == 8'h50) && can_move(-1, 0) && delay_event) begin
                     current_x <= current_x - 1;
                     reset_x_delay();
                 end
-                else if ((keycode1 == 8'h07 || keycode2 == 8'h07) && can_move(1, 0) && delay_event) begin
+                else if ((keycode1 == 8'h4F || keycode2 == 8'h4F) && can_move(1, 0) && delay_event) begin
                     current_x <= current_x + 1;
                     reset_x_delay();
                 end
@@ -516,15 +544,15 @@ module game_logic (
                 end
                 
                 // Rotation
-                if ((keycode1 == 8'h0D || keycode2 == 8'h0D) && can_rotate(-1) && rot_event) begin
+                if ((keycode1 == 8'h1D || keycode2 == 8'h1D) && can_rotate(-1) && rot_event) begin
                     current_rotation <= current_rotation - 2'b01;
                     reset_rot_delay();
                 end
-                else if ((keycode1 == 8'h0F || keycode2 == 8'h0F) && can_rotate(1) && rot_event) begin
+                else if ((keycode1 == 8'h1B || keycode2 == 8'h1B) && can_rotate(1) && rot_event) begin
                     current_rotation <= current_rotation + 2'b01;
                     reset_rot_delay();
                 end
-                else if ((keycode1 == 8'h0E || keycode2 == 8'h0E) && can_rotate(2) && rot_event) begin
+                else if ((keycode1 == 8'h04 || keycode2 == 8'h04) && can_rotate(2) && rot_event) begin
                     current_rotation <= current_rotation + 2'b10;
                     reset_rot_delay();
                 end
@@ -532,13 +560,13 @@ module game_logic (
                     rot_timer <= rot_timer - 1;
                 end
             end
-            if (game_state == WIGGLE && (keycode1 == 8'h0D || keycode2 == 8'h0D || keycode1 == 8'h0F || keycode2 == 8'h0F || keycode1 == 8'h0E || keycode2 == 8'h0E) &&
+            if (game_state == WIGGLE && (keycode1 == 8'h1D || keycode2 == 8'h1D || keycode1 == 8'h1B || keycode2 == 8'h1B || keycode1 == 8'h04 || keycode2 == 8'h04) &&
                 (wiggle_rotate_bot(-1) || wiggle_rotate_bot(1)) && rot_event) begin
                 current_y <= current_y - 1;
             end
         end
+        prev_keycode1_down <= (keycode1 == 8'd44 || keycode2 == 8'd44);
      end
-
 
 
 
@@ -560,9 +588,7 @@ module game_logic (
                 end
             end
             FALLING:
-                if (drop_event && !can_move(0, 1)) begin
-                    next_state = WIGGLE;
-                end
+                next_state = WIGGLE;
             WIGGLE:
                 if (wiggle_event && !can_move(0, 1)) begin
                     next_state = LOCK_PIECE;
@@ -614,6 +640,42 @@ module game_logic (
                         RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
                         BLACK:  {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h0};
                         WHITE:  {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                        default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                    endcase
+                end
+            end
+            logic [35:0] next_data;
+            case (next_piece)
+                PIECE_I: next_data = piece_data[{PIECE_I, 2'b00}];
+                PIECE_J: next_data = piece_data[{PIECE_J, 2'b00}];
+                PIECE_L: next_data = piece_data[{PIECE_L, 2'b00}];
+                PIECE_O: next_data = piece_data[{PIECE_O, 2'b00}];
+                PIECE_S: next_data = piece_data[{PIECE_S, 2'b00}];
+                PIECE_T: next_data = piece_data[{PIECE_T, 2'b00}];
+                PIECE_Z: next_data = piece_data[{PIECE_Z, 2'b00}];
+                default: next_data = 36'b0;
+            endcase
+
+            localparam NEXT_X = SCORE_BASE_X;
+            localparam NEXT_Y = SCORE_BASE_Y + 40;
+
+            logic [9:0] next_grid_x = drawX - NEXT_X;
+            logic [9:0] next_grid_y = drawY - NEXT_Y;
+
+            for (int b = 0; b < 4; b++) begin
+                logic [3:0] px = next_data[(b*9+5) +: 4];
+                logic [4:0] py = next_data[(b*9+0) +: 5];
+
+                if (drawX >= NEXT_X + px * CELL_SIZE && drawX < NEXT_X + (px + 1) * CELL_SIZE &&
+                    drawY >= NEXT_Y + py * CELL_SIZE && drawY < NEXT_Y + (py + 1) * CELL_SIZE) begin
+                    unique case (next_color)
+                        CYAN:   {r_grid, g_grid, b_grid} = {4'h0, 4'hF, 4'hF};
+                        BLUE:   {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h9};
+                        ORANGE: {r_grid, g_grid, b_grid} = {4'hF, 4'h6, 4'h0};
+                        YELLOW: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'h0};
+                        GREEN:  {r_grid, g_grid, b_grid} = {4'h0, 4'hC, 4'h0};
+                        PURPLE: {r_grid, g_grid, b_grid} = {4'h8, 4'h0, 4'hF};
+                        RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
                         default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
                     endcase
                 end
