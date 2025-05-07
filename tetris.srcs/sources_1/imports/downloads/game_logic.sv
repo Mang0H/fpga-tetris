@@ -110,9 +110,7 @@ module game_logic (
     localparam SCORE_COLS   = 20;       // "SCORE:9999  LEVEL:99" = 16 chars
     localparam SCORE_BASE_X = GRID_X_OFFSET + GRID_WIDTH + 20;  // 440
     localparam SCORE_BASE_Y = GRID_Y_OFFSET;                    // 40
-    localparam NEXT_X = SCORE_BASE_X;
-    localparam NEXT_Y = SCORE_BASE_Y + 40; // below score
-
+    
     logic [3:0] r_grid, g_grid, b_grid;   // rename existing red/green/blue → grid
     logic [3:0] r_txt,  g_txt,  b_txt;
     logic        txt_on;
@@ -604,6 +602,9 @@ module game_logic (
         endcase
      end
 
+    logic [9:0] next_grid_x;
+    logic [9:0] next_grid_y;
+
     //Rendering logic
     always_comb begin
         r_grid = BLACK;
@@ -640,42 +641,6 @@ module game_logic (
                         RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
                         BLACK:  {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h0};
                         WHITE:  {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
-                        default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
-                    endcase
-                end
-            end
-            logic [35:0] next_data;
-            case (next_piece)
-                PIECE_I: next_data = piece_data[{PIECE_I, 2'b00}];
-                PIECE_J: next_data = piece_data[{PIECE_J, 2'b00}];
-                PIECE_L: next_data = piece_data[{PIECE_L, 2'b00}];
-                PIECE_O: next_data = piece_data[{PIECE_O, 2'b00}];
-                PIECE_S: next_data = piece_data[{PIECE_S, 2'b00}];
-                PIECE_T: next_data = piece_data[{PIECE_T, 2'b00}];
-                PIECE_Z: next_data = piece_data[{PIECE_Z, 2'b00}];
-                default: next_data = 36'b0;
-            endcase
-
-            localparam NEXT_X = SCORE_BASE_X;
-            localparam NEXT_Y = SCORE_BASE_Y + 40;
-
-            logic [9:0] next_grid_x = drawX - NEXT_X;
-            logic [9:0] next_grid_y = drawY - NEXT_Y;
-
-            for (int b = 0; b < 4; b++) begin
-                logic [3:0] px = next_data[(b*9+5) +: 4];
-                logic [4:0] py = next_data[(b*9+0) +: 5];
-
-                if (drawX >= NEXT_X + px * CELL_SIZE && drawX < NEXT_X + (px + 1) * CELL_SIZE &&
-                    drawY >= NEXT_Y + py * CELL_SIZE && drawY < NEXT_Y + (py + 1) * CELL_SIZE) begin
-                    unique case (next_color)
-                        CYAN:   {r_grid, g_grid, b_grid} = {4'h0, 4'hF, 4'hF};
-                        BLUE:   {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h9};
-                        ORANGE: {r_grid, g_grid, b_grid} = {4'hF, 4'h6, 4'h0};
-                        YELLOW: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'h0};
-                        GREEN:  {r_grid, g_grid, b_grid} = {4'h0, 4'hC, 4'h0};
-                        PURPLE: {r_grid, g_grid, b_grid} = {4'h8, 4'h0, 4'hF};
-                        RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
                         default:{r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
                     endcase
                 end
