@@ -1,5 +1,3 @@
-
-
 module game_logic (
     input  logic clk,
     input  logic reset,
@@ -24,6 +22,11 @@ module game_logic (
     localparam GRID_X_OFFSET = 220; // Starting x-coordinate
     localparam GRID_Y_OFFSET = 40;  // Starting y-coordinate
 
+    localparam HOLD_X_OFFSET = GRID_X_OFFSET - 100; // Left of the grid
+    localparam HOLD_Y_OFFSET = GRID_Y_OFFSET;       // Same vertical position as grid start
+    localparam HOLD_WIDTH = 4 * CELL_SIZE;          // Enough for any piece
+    localparam HOLD_HEIGHT = 3 * CELL_SIZE;
+
         // Color definitions
     localparam BLACK  = 4'h0;
     localparam WHITE  = 4'h1;
@@ -43,6 +46,7 @@ module game_logic (
         WIGGLE,
         LOCK_PIECE,
         CLEAR_LINES,
+        HOLD,
         GAME_OVER
     } game_state_t;
 
@@ -57,9 +61,24 @@ module game_logic (
         PIECE_Z
     } piece_type_t;
 
-// Game variables
+    typedef struct packed {
+        logic signed [3:0] dx;
+        logic signed [3:0] dy;
+    } wall_kick_t;
+
+    // Wall kick tables for each rotation transition
+    wall_kick_t wall_kicks_0R [0:4] = '{'{0, 0}, '{-1, 0}, '{-1, 1}, '{0, -2}, '{-1, -2}};
+    wall_kick_t wall_kicks_R0 [0:4] = '{'{0, 0}, '{1, 0}, '{1, -1}, '{0, 2}, '{1, 2}};
+    wall_kick_t wall_kicks_R2 [0:4] = '{'{0, 0}, '{1, 0}, '{1, -1}, '{0, 2}, '{1, 2}};
+    wall_kick_t wall_kicks_2R [0:4] = '{'{0, 0}, '{-1, 0}, '{-1, 1}, '{0, -2}, '{-1, -2}};
+    wall_kick_t wall_kicks_2L [0:4] = '{'{0, 0}, '{1, 0}, '{1, 1}, '{0, -2}, '{1, -2}};
+    wall_kick_t wall_kicks_L2 [0:4] = '{'{0, 0}, '{-1, 0}, '{-1, -1}, '{0, 2}, '{-1, 2}};
+    wall_kick_t wall_kicks_L0 [0:4] = '{'{0, 0}, '{-1, 0}, '{-1, -1}, '{0, 2}, '{-1, 2}};
+    wall_kick_t wall_kicks_0L [0:4] = '{'{0, 0}, '{1, 0}, '{1, 1}, '{0, -2}, '{1, -2}};
+
+    // Game variables
     game_state_t game_state, next_state;
-    piece_type_t current_piece, next_piece;
+    piece_type_t current_piece, next_piece, hold_piece;
     logic [4:0] vram [0:19][0:11];
     logic [1:0] current_rotation;
     logic [4:0] current_x; // 0-9
@@ -71,6 +90,9 @@ module game_logic (
     logic [2:0] rand_val;
     logic [15:0] lfsr_reg;
     logic lfsr_feedback;
+    logic hold_active;
+    logic can_hold;
+    logic hold_flag;
     
     // Timing and controls
     logic [31:0] drop_timer;
@@ -97,6 +119,9 @@ module game_logic (
 
     // Tetramino ROM interface
     logic [35:0] piece_data [0:3];
+    logic [35:0] hold_piece_data;
+
+    //Wall kick info
     
     // Calculate coordinates relative to grid's top-left corner
     logic [9:0] gridX, gridY;
@@ -118,7 +143,7 @@ module game_logic (
     assign gridY = (drawY >= GRID_Y_OFFSET) ? (drawY - GRID_Y_OFFSET) : 10'h3FF;
     assign cellX = gridX % CELL_SIZE; // Pixel within cell
     assign cellY = gridY % CELL_SIZE;
-    assign grid_cellX = (gridX / CELL_SIZE) + 2; // X grid coordinate (0-9)
+    assign grid_cellX = (gridX / CELL_SIZE) + 2; // X grid coordinate (2-11)
     assign grid_cellY = gridY / CELL_SIZE; // Y grid coordinate (0-19)
 
     function automatic [7:0] to_ascii(input logic [3:0] nibble);
@@ -181,6 +206,13 @@ module game_logic (
     always_comb begin : mux_grid_text
         {red,green,blue} = txt_on ? {r_txt,g_txt,b_txt} : {r_grid,g_grid,b_grid};
     end
+
+    logic [9:0] holdX, holdY;
+    logic [4:0] hold_cellX, hold_cellY;
+    assign holdX = (drawX >= HOLD_X_OFFSET) ? (drawX - HOLD_X_OFFSET) : 10'h3FF;
+    assign holdY = (drawY >= HOLD_Y_OFFSET) ? (drawY - HOLD_Y_OFFSET) : 10'h3FF;
+    assign hold_cellX = holdX / CELL_SIZE;
+    assign hold_cellY = holdY / CELL_SIZE;
     
 
     always_comb begin
@@ -230,6 +262,19 @@ module game_logic (
         endcase
     end
 
+    always_comb begin
+        case(hold_piece)
+            PIECE_I: hold_piece_data = {4'd0, 5'd1, 4'd1, 5'd1, 4'd2, 5'd1, 4'd3, 5'd1};// Horizontal
+            PIECE_J: hold_piece_data = {4'd1, 5'd1, 4'd1, 5'd2, 4'd2, 5'd2, 4'd3, 5'd2};
+            PIECE_L: hold_piece_data = {4'd1, 5'd2, 4'd2, 5'd2, 4'd3, 5'd1, 4'd3, 5'd2};
+            PIECE_O: hold_piece_data = {4'd2, 5'd1, 4'd2, 5'd2, 4'd3, 5'd1, 4'd3, 5'd2};
+            PIECE_S: hold_piece_data = {4'd1, 5'd2, 4'd2, 5'd1, 4'd2, 5'd2, 4'd3, 5'd1};
+            PIECE_T: hold_piece_data = {4'd1, 5'd2, 4'd2, 5'd1, 4'd2, 5'd2, 4'd3, 5'd2};
+            PIECE_Z: hold_piece_data = {4'd1, 5'd1, 4'd2, 5'd1, 4'd2, 5'd2, 4'd3, 5'd2};
+            default: hold_piece_data = 36'b0;
+        endcase
+    end
+
     //Check if we are drawing the active piece
     logic in_active_piece;
     logic [3:0] active_piece_color;
@@ -241,12 +286,31 @@ module game_logic (
 
         active_piece_color = current_color;
     end
-    task automatic new_piece();
-        // Simple pseudo-random number (replace with better RNG if needed)
-        rand_val <= lfsr_reg % 7;
+
+    logic in_hold_piece;
+    logic [3:0] hold_piece_color;
+    always_comb begin
+        in_hold_piece = (((hold_piece_data[8:5] == hold_cellX) && (hold_piece_data[4:0] == hold_cellY)) ||
+                        ((hold_piece_data[17:14] == hold_cellX) && (hold_piece_data[13:9] == hold_cellY)) ||
+                        ((hold_piece_data[26:23] == hold_cellX) && (hold_piece_data[22:18] == hold_cellY)) ||
+                        ((hold_piece_data[35:32] == hold_cellX) && (hold_piece_data[31:27] == hold_cellY)));
         
+        case (hold_piece)
+            PIECE_I: hold_piece_color = CYAN;
+            PIECE_J: hold_piece_color = BLUE;
+            PIECE_L: hold_piece_color = ORANGE;
+            PIECE_O: hold_piece_color = YELLOW;
+            PIECE_S: hold_piece_color = GREEN;
+            PIECE_T: hold_piece_color = PURPLE;
+            PIECE_Z: hold_piece_color = RED;
+            default: hold_piece_color = BLACK;
+        endcase
+    end
+
+    
+    task automatic new_random_piece(); // Renamed for clarity
+        rand_val = lfsr_reg % 7;
         next_piece <= piece_type_t'(rand_val);
-        
         // Set color based on piece type
         case (piece_type_t'(rand_val))
             PIECE_I: next_color <= CYAN;
@@ -256,6 +320,7 @@ module game_logic (
             PIECE_S: next_color <= GREEN;
             PIECE_T: next_color <= PURPLE;
             PIECE_Z: next_color <= RED;
+            default: next_color <= BLACK; // Or some default
         endcase
     endtask
 
@@ -392,7 +457,7 @@ module game_logic (
             delay_timer <= 0;
             wiggle_timer <=0;
             count <= 0;
-            lfsr_reg <= 16'hA12B;
+            lfsr_reg = 16'hA12B;
             current_x <= 0;
             current_y <= 0;
 
@@ -401,6 +466,10 @@ module game_logic (
             
             hard_drop_active <= 0;
             new_piece();
+            can_hold <= 1;
+            hold_active <= 0;
+            hold_flag <= 0;
+            new_random_piece();
         end else begin
             // Default next state
             game_state <= next_state;
@@ -408,10 +477,11 @@ module game_logic (
                 INIT: begin
                     count <= count + 3'b1;
                     lfsr_reg <= {lfsr_reg[14:0], lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10]};
-                    new_piece();
                 end
                 SPAWN_PIECE: begin
-                    new_piece();
+                    if (hold_flag) begin
+                        hold_flag <= 0; // Consume the flag, next_piece is already correctly set by HOLD state
+                    end
                     current_y <= 0;
                     current_x <= 5;
                     current_rotation <= 0;
@@ -419,7 +489,7 @@ module game_logic (
                     reset_x_delay();
                 end
                 FALLING: begin
-                    new_piece();
+                    // new_piece();
                     current_piece <= next_piece;
                     current_color <= next_color;
                     if (can_move(0, 1)) begin
@@ -430,6 +500,7 @@ module game_logic (
                 end
                 WIGGLE: begin
                     reset_wiggle_delay();
+                    lfsr_reg <= {lfsr_reg[14:0], lfsr_reg[15] ^ lfsr_reg[13] ^ lfsr_reg[12] ^ lfsr_reg[10]};
                     if (can_move(0, 1)) begin
                         if (drop_event) begin
                             current_y <= current_y + 1;
@@ -437,6 +508,10 @@ module game_logic (
                     end
                 end
                 LOCK_PIECE: begin
+                    new_random_piece();
+                    if (!can_hold && hold_active) begin
+                        can_hold <= 1;
+                    end 
                     for(int x=0; x<4; x++) begin
                         block_x_offset[x] = piece_data[current_rotation][(x*9 + 5) +:4];
                         block_y_offset[x] = piece_data[current_rotation][(x*9) +: 5];
@@ -488,6 +563,31 @@ module game_logic (
                             reset_drop_timer();
                         end
                     end
+                HOLD: begin
+                    hold_flag <= 1; // Signal that a hold operation occurred
+                    if (can_hold) begin
+                        if (!hold_active) begin // First time holding a piece
+                            hold_piece <= current_piece;
+                            hold_active <= 1'b1;
+                            // Generate a new random piece to be the next falling piece
+                            new_random_piece();
+                        end else begin // Swapping with an existing hold_piece
+                            piece_type_t temp_piece_type;
+                            logic [3:0] temp_color; // If you want to also handle color here for consistency, though hold_piece_color is separate
+
+                            temp_piece_type = current_piece; // Store the currently falling piece
+
+                            // The piece from the hold slot becomes the next piece to spawn
+                            next_piece <= hold_piece;
+                            // Set next_color based on the piece coming from hold
+                            next_color <= hold_piece_color;
+
+                            // The (previously) falling piece goes into the hold slot
+                            hold_piece <= temp_piece_type;
+                        end
+                        can_hold <= 0; // Player cannot hold again until the next piece is locked
+                    end
+                    // If !can_hold, this state essentially does nothing except set hold_flag and transition.
                 end
             endcase
             if (game_state == FALLING || game_state == WIGGLE) begin
@@ -525,7 +625,6 @@ module game_logic (
                     wiggle_timer <= wiggle_timer - 1;
                 end
 
-                // Left/right movement
                 if ((keycode1 == 8'h50 || keycode2 == 8'h50) && can_move(-1, 0) && delay_event) begin
                     current_x <= current_x - 1;
                     reset_x_delay();
@@ -537,8 +636,7 @@ module game_logic (
                 else if (delay_timer > 0) begin
                     delay_timer <= delay_timer - 1;
                 end
-                
-                // Rotation
+
                 if ((keycode1 == 8'h1D || keycode2 == 8'h1D) && can_rotate(-1) && rot_event) begin
                     current_rotation <= current_rotation - 2'b01;
                     reset_rot_delay();
@@ -555,7 +653,7 @@ module game_logic (
                     rot_timer <= rot_timer - 1;
                 end
             end
-                if (game_state == WIGGLE && (keycode1 == 8'h1D || keycode2 == 8'h1D || keycode1 == 8'h1B || keycode2 == 8'h1B || keycode1 == 8'h04 || keycode2 == 8'h04) &&
+            if (game_state == WIGGLE && (keycode1 == 8'h1D || keycode2 == 8'h1D || keycode1 == 8'h1B || keycode2 == 8'h1B || keycode1 == 8'h04 || keycode2 == 8'h04) &&
                 (wiggle_rotate_bot(-1) || wiggle_rotate_bot(1)) && rot_event) begin
                 current_y <= current_y - 1;
             end
@@ -578,22 +676,37 @@ module game_logic (
             SPAWN_PIECE: begin
                 if (!can_move(0, 0)) begin
                      next_state = GAME_OVER;
-                end else begin
+                end 
+                else if ((keycode1 == 8'h06 || keycode2 == 8'h06) && can_hold) begin
+                    next_state = HOLD;
+                end
+                else begin
                     next_state = FALLING;
                 end
             end
             FALLING:
                 if (drop_event && !can_move(0, 1)) begin
                     next_state = WIGGLE;
+                end 
+                else if ((keycode1 == 8'h06 || keycode2 == 8'h06) && can_hold) begin
+                    next_state = HOLD;
                 end
             WIGGLE:
                 if (wiggle_event && !can_move(0, 1)) begin
                     next_state = LOCK_PIECE;
                 end
-            LOCK_PIECE:
+                else if ((keycode1 == 8'h06 || keycode2 == 8'h06) && can_hold) begin
+                    next_state = HOLD;
+                end
+            LOCK_PIECE: begin
                 next_state = CLEAR_LINES;
-            CLEAR_LINES:
+            end
+            CLEAR_LINES: begin
                 next_state = INIT;
+            end
+            HOLD: begin
+                next_state = INIT;
+            end
             GAME_OVER:
                 if (reset) begin
                     next_state = INIT;
@@ -608,9 +721,31 @@ module game_logic (
         b_grid = BLACK;
 
         if (vde) begin
-            if (gridX <= GRID_WIDTH && gridY <= GRID_HEIGHT) begin
-                if ((cellX == 0 || cellY == 0) && !in_active_piece && !(vram[grid_cellY][grid_cellX][4] == 1)) begin
+            if (holdX <= HOLD_WIDTH && holdY <= HOLD_HEIGHT) begin
+                if ((holdX%CELL_SIZE == 0 && hold_cellX==0) || (holdY%CELL_SIZE == 0 && hold_cellY==0) || (holdX%CELL_SIZE == 0 && hold_cellX==4) || (holdY%CELL_SIZE == 0 && hold_cellY==3)) begin
+                    {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF}; 
+                end
+                else if (in_hold_piece) begin
+                    unique case (hold_piece_color)
+                        CYAN:   {r_grid, g_grid, b_grid} = {4'h0, 4'hF, 4'hF};
+                        BLUE:   {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h9};
+                        ORANGE: {r_grid, g_grid, b_grid} = {4'hF, 4'h6, 4'h0};
+                        YELLOW: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'h0};
+                        GREEN:  {r_grid, g_grid, b_grid} = {4'h0, 4'hC, 4'h0};
+                        PURPLE: {r_grid, g_grid, b_grid} = {4'h8, 4'h0, 4'hF};
+                        RED:    {r_grid, g_grid, b_grid} = {4'hF, 4'h0, 4'h0};
+                        BLACK:  {r_grid, g_grid, b_grid} = {4'h0, 4'h0, 4'h0}; 
+                        WHITE:  {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                        default: {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                    endcase
+                end
+            end
+            else if (gridX <= GRID_WIDTH && gridY <= GRID_HEIGHT) begin
+                if ((grid_cellX == 2 && cellX ==0) || (grid_cellY == 0 && cellY == 0) || (grid_cellX == 12 && cellX == 0) || (grid_cellY == 20 && cellY == 0)) begin
                     {r_grid, g_grid, b_grid} = {4'hF, 4'hF, 4'hF};
+                end
+                else if ((cellX == 0 || cellY == 0 || cellX == 19 || cellY == 19) && !in_active_piece && !(vram[grid_cellY][grid_cellX][4] == 1)) begin
+                    {red, green, blue} = {4'hE, 4'hE, 4'hE};
                 end
                 else if (in_active_piece && (game_state == FALLING || game_state == WIGGLE)) begin
                     unique case (active_piece_color)
@@ -645,11 +780,3 @@ module game_logic (
     end
 
 endmodule
-
-
-
-
-
-
-
-
