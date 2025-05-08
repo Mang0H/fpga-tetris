@@ -82,19 +82,18 @@ module game_logic (
     logic rot_event;
     logic wiggle_event;
 
-    logic prev_keycode1_down;
-
-    localparam INITIAL_DROP_TIME = 25_000_000;  // Adjust for your clock speed
-    localparam int MIN_DROP_TIME  = 300_000;
+    localparam INITIAL_DROP_TIME = 25000000; // Adjust for your clock speed
     localparam SOFT_DROP_TIME = 1000000;
+    localparam int MIN_DROP_TIME  = 300_000;
     localparam X_DELAY = 2500000;
     localparam R_DELAY = 5000000;
-    localparam WIGGLE_DELAY = 10000000;
+    localparam WIGGLE_DELAY = 12500000;
     // localparam INITIAL_DROP_TIME = 1000;
     // localparam SOFT_DROP_TIME = 100;
     // localparam X_DELAY = 200;
     // localparam R_DELAY = 200;
     // localparam WIGGLE_DELAY = 200;
+    localparam LEVEL_DROP_DECREMENT = 50_000;
 
     // Tetramino ROM interface
     logic [35:0] piece_data [0:3];
@@ -110,7 +109,7 @@ module game_logic (
     localparam SCORE_COLS   = 20;       // "SCORE:9999  LEVEL:99" = 16 chars
     localparam SCORE_BASE_X = GRID_X_OFFSET + GRID_WIDTH + 20;  // 440
     localparam SCORE_BASE_Y = GRID_Y_OFFSET;                    // 40
-    
+
     logic [3:0] r_grid, g_grid, b_grid;   // rename existing red/green/blue → grid
     logic [3:0] r_txt,  g_txt,  b_txt;
     logic        txt_on;
@@ -154,7 +153,7 @@ module game_logic (
 
     // Updated scoreboard generation
     always_comb begin : make_scoreboard
-        // upper line: "SCORE:000000"
+        // upper line
         s0  = "S";  s1  = "C";  s2  = "O";  s3  = "R";  s4  = "E";  s5  = ":";
         s6  = to_ascii((score / 100000) % 10);
         s7  = to_ascii((score / 10000)  % 10);
@@ -165,12 +164,11 @@ module game_logic (
         s12 = " "; s13 = " "; s14 = " "; s15 = " ";
         s16 = " "; s17 = " "; s18 = " "; s19 = " ";
 
-        // lower line: "LEVEL:00"
+        // lower line
         l0 = "L"; l1 = "E"; l2 = "V"; l3 = "E"; l4 = "L"; l5 = ":";
         l6 = to_ascii((level / 10) % 10);
         l7 = to_ascii(level % 10);
         l8 = " "; l9 = " "; l10 = " "; l11 = " "; l12 = " "; l13 = " "; l14 = " "; l15 = " ";
-        l16 = " "; l17 = " "; l18 = " "; l19 = " ";
 
         scoreboard_packed = {
             l19, l18, l17, l16, l15, l14, l13, l12, l11, l10,
@@ -245,8 +243,7 @@ module game_logic (
     end
     task automatic new_piece();
         // Simple pseudo-random number (replace with better RNG if needed)
-
-        rand_val <= lfsr_reg % 7; 
+        rand_val <= lfsr_reg % 7;
         
         next_piece <= piece_type_t'(rand_val);
         
@@ -262,14 +259,19 @@ module game_logic (
         endcase
     endtask
 
-    task automatic reset_drop_timer();
-        int computed_drop;
-        computed_drop = INITIAL_DROP_TIME / (level + 1); // avoid division by zero
+    logic [31:0] drop_table [0:99];
 
-        if (computed_drop < MIN_DROP_TIME)
-            drop_timer <= MIN_DROP_TIME;
-        else
-            drop_timer <= computed_drop;
+    genvar i;
+    generate
+        for (i = 0; i < 100; i++) begin : drop_table_init
+            localparam int raw_val = INITIAL_DROP_TIME / (i + 1);
+            localparam int clamped_val = (raw_val < MIN_DROP_TIME) ? MIN_DROP_TIME : raw_val;
+            initial drop_table[i] = clamped_val;
+        end
+    endgenerate
+
+    task automatic reset_drop_timer();
+        drop_timer <= drop_table[level];
     endtask
 
     task automatic reset_soft_timer();
@@ -371,7 +373,6 @@ module game_logic (
     logic [4:0] completed;
     logic line_complete;
 
-
      always_ff @(posedge clk or posedge reset) begin
         if (reset) begin
             game_state <= INIT;
@@ -387,26 +388,22 @@ module game_logic (
             score <= 0;
             level <= 0;
             lines_cleared <= 0;
-
             drop_timer <= 0;
-
-
             delay_timer <= 0;
             wiggle_timer <=0;
             count <= 0;
-            lfsr_reg <= 16'h7DFC;
+            lfsr_reg <= 16'hA12B;
             current_x <= 0;
             current_y <= 0;
 
             line_complete <= 0;
             completed <= 0;
-
+            
             hard_drop_active <= 0;
             new_piece();
         end else begin
             // Default next state
             game_state <= next_state;
-
             unique case (next_state)
                 INIT: begin
                     count <= count + 3'b1;
@@ -496,7 +493,7 @@ module game_logic (
             if (game_state == FALLING || game_state == WIGGLE) begin
 
                 // Start hard drop on spacebar
-                if ((keycode1 == 8'd44 || keycode2 == 8'd44) && !prev_keycode1_down) begin
+                if ((keycode1 == 8'd44 || keycode2 == 8'd44) && !hard_drop_active) begin
                     hard_drop_active <= 1;
                 end
 
@@ -558,13 +555,13 @@ module game_logic (
                     rot_timer <= rot_timer - 1;
                 end
             end
-            if (game_state == WIGGLE && (keycode1 == 8'h1D || keycode2 == 8'h1D || keycode1 == 8'h1B || keycode2 == 8'h1B || keycode1 == 8'h04 || keycode2 == 8'h04) &&
+                if (game_state == WIGGLE && (keycode1 == 8'h1D || keycode2 == 8'h1D || keycode1 == 8'h1B || keycode2 == 8'h1B || keycode1 == 8'h04 || keycode2 == 8'h04) &&
                 (wiggle_rotate_bot(-1) || wiggle_rotate_bot(1)) && rot_event) begin
                 current_y <= current_y - 1;
             end
         end
-        prev_keycode1_down <= (keycode1 == 8'd44 || keycode2 == 8'd44);
      end
+
 
 
 
@@ -586,7 +583,9 @@ module game_logic (
                 end
             end
             FALLING:
-                next_state = WIGGLE;
+                if (drop_event && !can_move(0, 1)) begin
+                    next_state = WIGGLE;
+                end
             WIGGLE:
                 if (wiggle_event && !can_move(0, 1)) begin
                     next_state = LOCK_PIECE;
@@ -601,9 +600,6 @@ module game_logic (
                 end
         endcase
      end
-
-    logic [9:0] next_grid_x;
-    logic [9:0] next_grid_y;
 
     //Rendering logic
     always_comb begin
@@ -649,7 +645,6 @@ module game_logic (
     end
 
 endmodule
-
 
 
 

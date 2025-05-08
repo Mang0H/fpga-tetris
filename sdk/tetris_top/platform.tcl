@@ -51,3 +51,13 @@ platform generate -domains
 platform active {tetris_top}
 platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
 platform generate
+platform active {tetris_top}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate
+platform active {tetris_top}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate
+platform active {tetris_top}
+platform config -updatehw {/home/user/fpga-tetris/tetris_top.xsa}
+platform generate
